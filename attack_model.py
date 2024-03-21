@@ -29,6 +29,7 @@ import foolbox
 import wideresnet
 from collections import OrderedDict
 from utils import *
+import chemprop_utils
 
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
@@ -100,7 +101,7 @@ class gradient_attack_wrapper(nn.Module):
     x.requires_grad_()
     out = self.model.module.refined_logits(x)
     return out
-
+    
   def eval(self):
     return self.model.eval()
 
@@ -109,11 +110,9 @@ model_attack_wrapper =gradient_attack_wrapper
 transformer_train  = transforms.Compose([transforms.ToTensor()])
 transformer_test  = transforms.Compose([transforms.ToTensor()])
 
-data_loader  = torch.utils.data.DataLoader(datasets.CIFAR10(data_dir, train=False,
-                                                            transform=transformer_test, download=True),
+data_loader  = torch.utils.data.DataLoader(chemprop_utils.get_data(path = 'data/polymer_data.csv'),
                                            batch_size=args.batch_size, shuffle=False, num_workers=10)
-init_loader = torch.utils.data.DataLoader(datasets.CIFAR10(data_dir, train=True,
-                                                           download=True, transform=transformer_train),
+init_loader = torch.utils.data.DataLoader(chemprop_utils.get_data(path = 'data/polymer_data.csv'),
                                           batch_size=args.init_batch_size, shuffle=True, num_workers=1)
 
 

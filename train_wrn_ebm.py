@@ -28,10 +28,15 @@ import json
 from tqdm import tqdm
 t.backends.cudnn.benchmark = True
 t.backends.cudnn.enabled = True
+import deepchem as dc
+import chemprop_nn
+from chemprop_nn import MPN
+from chemprop.args import TrainArgs
 seed = 1
 im_sz = 32
 n_ch = 3
 
+import chemprop_utils
 
 
 class DataSubset(Dataset):
@@ -52,9 +57,11 @@ class DataSubset(Dataset):
 class F(nn.Module):
     def __init__(self, depth=28, width=2, norm=None, dropout_rate=0.0, n_classes=10):
         super(F, self).__init__()
-        self.f = wideresnet.Wide_ResNet(depth, width, norm=norm, dropout_rate=dropout_rate)
-        self.energy_output = nn.Linear(self.f.last_dim, 1)
-        self.class_output = nn.Linear(self.f.last_dim, n_classes)
+        # TODO: veryfy what needs to be passed into the MPN
+            # params: args (Trainargs?), atom feature vector dimension, bond feature vector dimension
+        self.f = MPN(args) 
+        self.energy_output = nn.Linear(self.f.last_dim, 1) #TODO (last_dim) -- nn.Linear params: in_features, out_features
+        self.class_output = nn.Linear(self.f.last_dim, n_classes) #TODO (last_dim)
 
     def forward(self, x, y=None):
         penult_z = self.f(x)
@@ -125,40 +132,16 @@ def get_model_and_buffer(args, device, sample_q):
     return f, replay_buffer
 
 
-def get_data(args):
-    if args.dataset == "svhn":
-        transform_train = tr.Compose(
-            [tr.Pad(4, padding_mode="reflect"),
-             tr.RandomCrop(im_sz),
-             tr.ToTensor(),
-             tr.Normalize((.5, .5, .5), (.5, .5, .5)),
-             lambda x: x + args.sigma * t.randn_like(x)]
-        )
-    else:
-        transform_train = tr.Compose(
-            [tr.Pad(4, padding_mode="reflect"),
-             tr.RandomCrop(im_sz),
-             tr.RandomHorizontalFlip(),
-             tr.ToTensor(),
-             tr.Normalize((.5, .5, .5), (.5, .5, .5)),
-             lambda x: x + args.sigma * t.randn_like(x)]
-        )
-    transform_test = tr.Compose(
-        [tr.ToTensor(),
-         tr.Normalize((.5, .5, .5), (.5, .5, .5)),
-         lambda x: x + args.sigma * t.randn_like(x)]
-    )
-    def dataset_fn(train, transform):
-        if args.dataset == "cifar10":
-            return tv.datasets.CIFAR10(root=args.data_root, transform=transform, download=True, train=train)
-        elif args.dataset == "cifar100":
-            return tv.datasets.CIFAR100(root=args.data_root, transform=transform, download=True, train=train)
-        else:
-            return tv.datasets.SVHN(root=args.data_root, transform=transform, download=True,
-                                    split="train" if train else "test")
+def get_data(args): #DONE: eliminate transformations -- only applicable to images (?)
+
+    def dataset_fn():
+        #(DONE): load polymer dataset
+        dataset = chemprop_utils.get_data(path = 'data/polymer_data.csv')
+        return dataset
+    
 
     # get all training inds
-    full_train = dataset_fn(True, transform_train)
+    full_train = dataset_fn()
     all_inds = list(range(len(full_train)))
     # set seed
     np.random.seed(1234)
@@ -181,19 +164,15 @@ def get_data(args):
     else:
         train_labeled_inds = train_inds
 
-    dset_train = DataSubset(
-        dataset_fn(True, transform_train),
-        inds=train_inds)
-    dset_train_labeled = DataSubset(
-        dataset_fn(True, transform_train),
-        inds=train_labeled_inds)
-    dset_valid = DataSubset(
-        dataset_fn(True, transform_test),
-        inds=valid_inds)
+    # CHECK: are transforms necessary for training/testing process -- do we need to check for data overlap
+    dset_train = DataSubset(dataset_fn(), inds=train_inds)
+    dset_train_labeled = DataSubset(dataset_fn(), inds=train_labeled_inds)
+    dset_valid = DataSubset(dataset_fn(), inds=valid_inds)
+
     dload_train = DataLoader(dset_train, batch_size=args.batch_size, shuffle=True, num_workers=4, drop_last=True)
     dload_train_labeled = DataLoader(dset_train_labeled, batch_size=args.batch_size, shuffle=True, num_workers=4, drop_last=True)
     dload_train_labeled = cycle(dload_train_labeled)
-    dset_test = dataset_fn(False, transform_test)
+    dset_test = dataset_fn()
     dload_valid = DataLoader(dset_valid, batch_size=100, shuffle=False, num_workers=4, drop_last=False)
     dload_test = DataLoader(dset_test, batch_size=100, shuffle=False, num_workers=4, drop_last=False)
     return dload_train, dload_train_labeled, dload_valid,dload_test
@@ -398,7 +377,6 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("Energy Based Models and Shit")
-    parser.add_argument("--dataset", type=str, default="cifar10", choices=["cifar10", "svhn", "cifar100"])
     parser.add_argument("--data_root", type=str, default="../data")
     # optimization
     parser.add_argument("--lr", type=float, default=1e-4)
@@ -451,5 +429,5 @@ if __name__ == "__main__":
     parser.add_argument("--n_valid", type=int, default=5000)
 
     args = parser.parse_args()
-    args.n_classes = 100 if args.dataset == "cifar100" else 10
+    args.n_classes = 100
     main(args)
